@@ -1,0 +1,21 @@
+body {
+padding-top: 20px;
+padding-bottom: 20px;
+}
+
+.navbar {
+margin-bottom: 20px;
+}
+
+.list-group{
+  margin-left: 50px;
+  margin-right: 50px;
+}
+
+.jumbotron{
+  margin: 30px;
+}
+
+.nav{
+    text-align: center;
+}
