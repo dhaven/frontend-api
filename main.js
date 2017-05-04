@@ -8,9 +8,15 @@ const BrowserWindow = electron.BrowserWindow
 
 const path = require('path')
 const url = require('url')
+const fs = require('fs')
+const Pool = require('threads').Pool;
 
 const {ipcMain} = require('electron')
 const {net} = require('electron')
+
+var events = require('events');
+var eventEmitter = new events.EventEmitter();
+var Jimp = require("jimp");
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
@@ -85,4 +91,74 @@ ipcMain.on('call', (event, arg) => {
     })
   })
   request.end()
+})
+
+stitch_image = function(arg){
+  if(arg.arr_imgs.length == arg.num_images){
+    im1 = arg.arr_imgs[0];
+    im2 = arg.arr_imgs[1];
+    max_x = 0;
+    max_y = 0;
+    for(var i = 0; i < arg.pos.length; i++){
+      curr = arg.pos[i].split(",");
+      if(curr[0] > max_x){
+        max_x = curr[0];
+      }
+      if(curr[1] > max_y){
+        max_y = curr[1];
+      }
+    }
+    out_width = max_x*im1.bitmap.width;
+    out_height = max_y*im1.bitmap.height;
+    var image = new Jimp(out_width,out_height);
+    for(var j = 0; j < arg.pos.length; j++){
+      offset_x = Number(arg.pos[j].split(",")[0])-1;
+      offset_y = Number(arg.pos[j].split(",")[1])-1;
+
+      image.blit(arg.arr_imgs[j], offset_x*im1.bitmap.width,offset_y*im1.bitmap.height,0,0,im1.bitmap.width,im1.bitmap.height );
+    }
+
+    image.write(arg.loc);
+  }else{
+    console.log("wait for more images");
+  }
+}
+
+
+ipcMain.on('dwnld',(event,arg) =>{
+  var i;
+  arr = arg.location.split("/");
+  image = arr[arr.length-1];
+  requests = [];
+  images = [];
+  posArr = []
+  eventEmitter.on('update_array',stitch_image);
+  for(i = 1; i <= arg.num; i++){
+    var request = net.request('https://1razj50pr8.execute-api.eu-west-1.amazonaws.com/stage1/download/' + arg.usr + "/" + image + "/" + i );
+    request.setHeader("Auth",arg.tkn);
+    request.on('response',(response) => {
+      event.sender.send('dwnld',`STATUS ${response.statusCode}`)
+      event.sender.send('dwnld',`HEADERS: ${JSON.stringify(response.headers)}`)
+      var buffer = new Buffer("");
+      response.on('data', (chunk) => {
+        buffer = Buffer.concat([buffer,new Buffer(`${chunk}`)])
+        console.log(`${chunk}`);
+      })
+      response.on('end', () => {
+        image_data = JSON.parse(buffer).base64Image;
+        console.log(image_data);
+        pos = JSON.parse(buffer).pos;
+        loc_split = arg.location.split(".");
+        new_loc = loc_split[0] + pos + "." + loc_split[1];
+        Jimp.read(Buffer.from(image_data, 'base64'), function (err, image) {
+            // do stuff with the image (if no exception)
+            images.push(image);
+            posArr.push(pos);
+            eventEmitter.emit('update_array',{'arr_imgs':images, 'num_images':arg.num,'pos':posArr, 'loc':arg.location});
+        });
+      })
+    })
+    request.end();
+    requests.push(request)
+  }
 })
