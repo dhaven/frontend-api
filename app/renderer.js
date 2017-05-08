@@ -83,7 +83,13 @@ $(function() {
 
   $('#refresh').click(function(){
     console.log({'tkn':idToken,'usr':username});
-    ipcRenderer.send('call',{'tkn':idToken,'usr':username});
+    ipcRenderer.send('refresh',{'tkn':idToken,'usr':username});
+  });
+
+  $('#upload').click(function(){
+    dialog.showOpenDialog({filters: [{name: 'Images', extensions: ['jpg', 'png', 'bmp']},]}, (result) =>{
+      ipcRenderer.send('upload',{'file':result,'usr':username, 'tkn':idToken});
+    });
   });
 
   $('#img-list').on('click','button',function(){
@@ -98,7 +104,7 @@ $(function() {
     console.log(arg);
   });
 
-  ipcRenderer.on('res', (event, arg) => {
+  ipcRenderer.on('refresh', (event, arg) => {
     imgs = JSON.parse(arg);
     list_images = {};
     console.log(arg);

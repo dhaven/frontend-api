@@ -17,6 +17,9 @@ const {net} = require('electron')
 var events = require('events');
 var eventEmitter = new events.EventEmitter();
 var Jimp = require("jimp");
+var request = require('request');
+require('request-debug')(request);
+var https = require('https')
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
@@ -76,7 +79,7 @@ app.on('activate', function () {
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
 
-ipcMain.on('call', (event, arg) => {
+ipcMain.on('refresh', (event, arg) => {
   const request = net.request('https://1razj50pr8.execute-api.eu-west-1.amazonaws.com/stage1/list')
   request.setHeader("Auth",arg.tkn);
   request.setHeader("username",arg.usr);
@@ -84,7 +87,7 @@ ipcMain.on('call', (event, arg) => {
     //event.sender.send('res',`STATUS ${response.statusCode}`)
     //event.sender.send('res',`HEADERS: ${JSON.stringify(response.headers)}`)
     response.on('data', (chunk) => {
-      event.sender.send('res',`${chunk}`)
+      event.sender.send('refresh',`${chunk}`)
     })
     response.on('end', () => {
       //event.sender.send('res','No more data in response.')
@@ -93,29 +96,93 @@ ipcMain.on('call', (event, arg) => {
   request.end()
 })
 
-stitch_image = function(arg){
-  if(arg.arr_imgs.length == arg.num_images){
-    im1 = arg.arr_imgs[0];
-    im2 = arg.arr_imgs[1];
-    max_x = 0;
-    max_y = 0;
-    for(var i = 0; i < arg.pos.length; i++){
-      curr = arg.pos[i].split(",");
-      if(curr[0] > max_x){
-        max_x = curr[0];
-      }
-      if(curr[1] > max_y){
-        max_y = curr[1];
+split_image = function(filename, numTiles, username, token){
+  Jimp.read(filename, function (err, image) {
+    if (err) throw err;
+    im_w = image.bitmap.width;
+    im_h = image.bitmap.height;
+
+    num_columns = Math.ceil(Math.sqrt(numTiles)); //number of tiles horizontally
+    num_rows = Math.ceil(numTiles/num_columns); //number of tiles vertically
+
+    tile_w = Math.floor(im_w/num_columns);
+    tile_h = Math.floor(im_h/num_rows);
+
+    var pos_y;
+    var pos_x;
+    var number = 1;
+    for(pos_y = 0; pos_y < im_h-num_rows; pos_y += tile_h){
+      for(pos_x = 0; pos_x < im_w-num_columns; pos_x += tile_w){
+        new_image = image.clone();
+        new_image.crop(pos_x, pos_y, tile_w,tile_h);
+        index_x = Math.floor(pos_x / tile_w) + 1;
+        index_y = Math.floor(pos_y / tile_h) + 1;
+
+        path_array =filename.split("/");
+        image_name = path_array[path_array.length-1];
+
+        new_file = image_name.split(".")[0] + index_x + "_" + index_y + "_" + number + "." + image_name.split(".")[1];
+        send_image(username,new_file,new_image, token)
+        number += 1;
       }
     }
-    out_width = max_x*im1.bitmap.width;
-    out_height = max_y*im1.bitmap.height;
-    var image = new Jimp(out_width,out_height);
-    for(var j = 0; j < arg.pos.length; j++){
-      offset_x = Number(arg.pos[j].split(",")[0])-1;
-      offset_y = Number(arg.pos[j].split(",")[1])-1;
+  });
+}
 
-      image.blit(arg.arr_imgs[j], offset_x*im1.bitmap.width,offset_y*im1.bitmap.height,0,0,im1.bitmap.width,im1.bitmap.height );
+send_image = function(username, filename, image_data, token){
+  image_data.getBase64(Jimp.MIME_PNG, function(err, result){
+    console.log("err" + err);
+    //console.log("base64 image: " + result);
+    my_image = result.replace("data:image/png;base64,","");
+    options = {
+      hostname: '1razj50pr8.execute-api.eu-west-1.amazonaws.com',
+      port: 443,
+      path: '/stage1/upload/' + username + '/' + filename,
+      method: 'POST',
+      //your options which have to include the two headers
+      headers : {
+        'Auth' : token,
+        'Content-Type': 'image/png',
+        'Content-Length': Buffer.byteLength(my_image)
+      }
+    };
+    var postreq = https.request(options, function (res) {
+      //Handle the response
+    });
+    postreq.write(my_image);
+    postreq.end();
+  });
+}
+
+ipcMain.on('upload',(event,arg) => {
+  console.log(arg.file[0]);
+  split_image(arg.file[0],5,arg.usr,arg.tkn);
+})
+
+stitch_image = function(arg){
+  if(arg.arr_imgs.length == arg.num_images){
+    //im1 = arg.arr_imgs[0];
+    //im2 = arg.arr_imgs[1];
+    max_x = 0;
+    max_y = 0;
+    for(var i = 0; i < arg.arr_imgs.length; i++){
+      curr = arg.arr_imgs[i][0].split(",");
+      if(Number(curr[0]) > max_x){
+        max_x = Number(curr[0]);
+      }
+      if(Number(curr[1]) > max_y){
+        max_y = Number(curr[1]);
+      }
+    }
+    out_width = max_x*arg.arr_imgs[0][1].bitmap.width;
+    out_height = max_y*arg.arr_imgs[0][1].bitmap.height;
+    var image = new Jimp(out_width,out_height);
+    for(var j = 0; j < arg.arr_imgs.length; j++){
+      current_image = arg.arr_imgs[j][1]
+      offset_x = Number(arg.arr_imgs[j][0].split(",")[0])-1;
+      offset_y = Number(arg.arr_imgs[j][0].split(",")[1])-1;
+
+      image.blit(current_image, offset_x*current_image.bitmap.width,offset_y*current_image.bitmap.height,0,0,current_image.bitmap.width,current_image.bitmap.height );
     }
 
     image.write(arg.loc);
@@ -130,8 +197,7 @@ ipcMain.on('dwnld',(event,arg) =>{
   arr = arg.location.split("/");
   image = arr[arr.length-1];
   requests = [];
-  images = [];
-  posArr = []
+  images = []; //put images in dictionary instead where index is image position
   eventEmitter.on('update_array',stitch_image);
   for(i = 1; i <= arg.num; i++){
     var request = net.request('https://1razj50pr8.execute-api.eu-west-1.amazonaws.com/stage1/download/' + arg.usr + "/" + image + "/" + i );
@@ -142,23 +208,25 @@ ipcMain.on('dwnld',(event,arg) =>{
       var buffer = new Buffer("");
       response.on('data', (chunk) => {
         buffer = Buffer.concat([buffer,new Buffer(`${chunk}`)])
-        console.log(`${chunk}`);
+        //console.log(`${chunk}`);
       })
       response.on('end', () => {
         image_data = JSON.parse(buffer).base64Image;
-        console.log(image_data);
         pos = JSON.parse(buffer).pos;
-        loc_split = arg.location.split(".");
-        new_loc = loc_split[0] + pos + "." + loc_split[1];
-        Jimp.read(Buffer.from(image_data, 'base64'), function (err, image) {
-            // do stuff with the image (if no exception)
-            images.push(image);
-            posArr.push(pos);
-            eventEmitter.emit('update_array',{'arr_imgs':images, 'num_images':arg.num,'pos':posArr, 'loc':arg.location});
-        });
+        console.log(pos);
+        read_image(images,image_data,pos,arg);
       })
     })
     request.end();
     requests.push(request)
   }
 })
+
+read_image = function(images,image_data,pos,arg){
+  Jimp.read(Buffer.from(image_data, 'base64'), function (err, image) {
+      // do stuff with the image (if no exception)
+      images.push([pos,image])
+      console.log(images)
+      eventEmitter.emit('update_array',{'arr_imgs':images, 'num_images':arg.num, 'loc':arg.location});
+  });
+}
