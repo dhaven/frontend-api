@@ -22,7 +22,7 @@
   "dependencies": {
     "bootstrap": "~3.3.7",
     "jimp": "^0.2.27",
-    "jquery": "~3.2.1",
+    "jquery": "~3.5.0",
     "jsonwebtoken": "~7.4.0",
     "nodejs": "0.0.0",
     "noe": "^1.0.3",
